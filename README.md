@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # GlobeTrotter — Frontend UI
 
 Premium travel-planning UI: Dashboard, My Trips, Trip Itinerary, Calendar,
