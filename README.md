@@ -1,19 +1,11 @@
-<<<<<<< HEAD
-# GlobeTrotter — Frontend UI
+# GlobeTrotter — Backend API
 
-Premium travel-planning UI: Dashboard, My Trips, Trip Itinerary, Calendar,
-and a public Shared Itinerary page. Built with React + TypeScript + Tailwind.
+Node.js + Express API for the GlobeTrotter frontend (Dashboard, Itinerary,
+Calendar/Timeline, Shared/Public view). Plain JSON-file storage — zero
+external database to install, so it runs anywhere `node` runs.
 
-## Design system
-
-- **Palette** — deep navy (`#0D1224`) base, aged-brass accent (`#C9A227`),
-  teal for secondary data, ivory text. Evokes an old travel atlas rather
-  than a generic SaaS dashboard.
-- **Type** — Fraunces (display/headlines), Inter (body/UI), JetBrains Mono
-  (coordinates, dates, data labels).
-- **Signature element** — the dashed "route line" that runs down the spine
-  of the itinerary timeline and calendar timeline view, echoing a route
-  drawn across a paper map.
+Matches the frontend's `src/lib/api.ts` client exactly:
+base URL `/api`, `Authorization: Bearer <token>` header, JSON in/out.
 
 ## Run it
 
@@ -22,50 +14,143 @@ npm install
 npm run dev
 ```
 
-Opens on `http://localhost:5173`. Build with `npm run build`.
+Starts on `http://localhost:5000` (matches the frontend's Vite proxy:
+`"/api": "http://localhost:5000"`). The database auto-seeds on first run.
 
-## Structure
+Demo login (also the default values pre-filled in the frontend's Login
+page):
 
 ```
+email:    traveler@example.com
+password: password
+```
+
+To reset the demo data at any time: delete `src/data/db.json` and restart
+the server (or run `npm run seed`).
+
+Copy `.env.example` to `.env` to override the port, JWT secret, etc.
+
+## Data model
+
+`src/data/db.json` (created from `src/data/seed.js`) holds:
+
+- **users** — `id, name, email, passwordHash, createdAt`
+- **trips** — `id, userId, name, destination, coverImage, startDate,
+  endDate, budget, progress, status, travelerName, isPublic, itinerary[]`
+  - **itinerary[].city** — `id, city, country, image, arrivalDate,
+    departureDate, coordinates, activities[]`
+    - **activities[]** — `id, name, time, description, cost`
+- **destinations** — `id, city, country, image, description, coordinates`
+- **recentActivity** — `id, text, timestamp, icon`
+
+Every trip is scoped to a `userId`; all `/api/trips` routes only ever
+read/write the logged-in user's own trips. The seeded trip ids
+(`trip-europe-2026`, `trip-japan-2026`, `trip-morocco-2026`,
+`trip-peru-2025`) intentionally match `src/data/mockTrips.ts` in the
+frontend, so the frontend's "merge server trip with mock trip" logic in
+`Dashboard.tsx` / `MyTrips.tsx` fills in the richer mock fields (images,
+full itinerary) seamlessly against the real server response.
+
+## API reference
+
+All routes are prefixed with `/api`. Routes marked 🔒 require
+`Authorization: Bearer <token>`.
+
+### Auth
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| POST | `/auth/register` | `{ name?, email, password }` | `{ token, user }` |
+| POST | `/auth/login` | `{ email, password }` | `{ token, user }` |
+| GET 🔒 | `/auth/me` | — | `{ user }` |
+
+### Trips
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| GET 🔒 | `/trips` | — | `Trip[]` (current user only) |
+| POST 🔒 | `/trips` | `{ name, destination, startDate, endDate, coverImage?, budget?, status?, travelerName? }` | `Trip` |
+| GET 🔒 | `/trips/:tripId` | — | `Trip` |
+| PUT 🔒 | `/trips/:tripId` | any subset of trip fields, incl. `isPublic` | `Trip` |
+| DELETE 🔒 | `/trips/:tripId` | — | `204` |
+
+### Cities (within a trip's itinerary)
+
+| Method | Path | Body |
+|---|---|---|
+| POST 🔒 | `/trips/:tripId/cities` | `{ city, country?, image?, arrivalDate, departureDate, coordinates? }` |
+| PUT 🔒 | `/trips/:tripId/cities/:cityId` | any subset of city fields |
+| DELETE 🔒 | `/trips/:tripId/cities/:cityId` | — |
+
+All three return the full updated `Trip`.
+
+### Activities (within a city)
+
+| Method | Path | Body |
+|---|---|---|
+| POST 🔒 | `/trips/:tripId/cities/:cityId/activities` | `{ name, time?, description?, cost? }` |
+| PUT 🔒 | `/trips/:tripId/cities/:cityId/activities/:activityId` | any subset of activity fields |
+| DELETE 🔒 | `/trips/:tripId/cities/:cityId/activities/:activityId` | — |
+
+All three return the full updated `Trip`.
+
+### Destinations (Explore page)
+
+| Method | Path | Returns |
+|---|---|---|
+| GET | `/destinations` | `Destination[]` |
+| GET | `/destinations/:id` | `Destination` |
+
+### Shared / public itinerary
+
+| Method | Path | Returns |
+|---|---|---|
+| GET | `/share/:tripId` | `Trip` — only if the trip's owner set `isPublic: true` via `PUT /trips/:tripId`; otherwise `404`. No auth required, read-only. |
+
+### Recent activity (Dashboard)
+
+| Method | Path | Returns |
+|---|---|---|
+| GET 🔒 | `/activity` | `RecentActivityItem[]` |
+
+### Health check
+
+| Method | Path | Returns |
+|---|---|---|
+| GET | `/health` | `{ status: "ok", timestamp }` |
+
+## Wiring it to the frontend
+
+The frontend already calls `GET /trips` from `Dashboard.tsx` and
+`MyTrips.tsx` via `src/lib/api.ts`, and stores the JWT under the
+`token` localStorage key on login — no frontend changes needed beyond
+making sure a real login happens first (`Login.tsx` already posts to
+`/auth/login`). To wire up the remaining pages:
+
+- **Itinerary.tsx** currently reads from `mockTrips` — swap in
+  `api.get(`/trips/${tripId}`)`.
+- **SharedItinerary.tsx** currently reads from `mockTrips` — swap in
+  `api.get(`/share/${tripId}`)` (no auth header needed/sent).
+- **CalendarPage.tsx** currently reads from `mockTrips` — swap in
+  `api.get("/trips")`, same as Dashboard/MyTrips.
+- To make a trip visible on its public share link, `PUT /trips/:tripId`
+  with `{ "isPublic": true }`.
+
+## Project structure
+
+```
+server.js                    Express app entry point
 src/
-  components/   Navbar, BackgroundVideo, TripCard, DestinationCard,
-                StatCard, ActivityCard, Timeline, Calendar,
-                PageTransition, Button, RoutePath
-  pages/        Login (placeholder), Dashboard, MyTrips, Itinerary,
-                Explore, CalendarPage, SharedItinerary
-  data/         mockTrips.ts, mockDestinations.ts — swap for real API calls
-  types/        shared TypeScript interfaces (Trip, ItineraryCity, Activity, Destination)
-public/videos/hero.mp4   the cinematic hero background video
+  db.js                      Tiny synchronous JSON-file data layer
+  middleware/auth.js         JWT sign + requireAuth/optionalAuth middleware
+  routes/
+    auth.js                  register, login, me
+    trips.js                 trips + nested cities + nested activities CRUD
+    destinations.js          Explore page data
+    share.js                 public read-only shared itinerary
+    activity.js              recent activity feed
+  utils/serialize.js         DB record -> frontend Trip/Destination shape
+  data/
+    seed.js                  writes db.json with demo user + 4 trips
+    db.json                  generated on first run (gitignored)
 ```
-
-## Integrating with your existing project
-
-This was built standalone since I didn't have your existing repo to inspect.
-To merge it in:
-
-1. **Replace `src/pages/Login.tsx`** with your team's real Login page and
-   real auth — the one here is a placeholder stub only, clearly marked as
-   such at the top of the file.
-2. **Copy `src/components/`, `src/pages/` (except Login), `src/data/`,
-   `src/types/`, `src/index.css`, and `tailwind.config.js`** into your
-   existing project, adjusting import paths if your folder layout differs.
-3. **Swap mock data for real API calls.** Every component takes data via
-   props/TypeScript interfaces (see `src/types/index.ts`) — no component
-   reaches into `mockTrips.ts` directly except the pages, so replacing
-   `mockTrips` / `mockDestinations` with fetched data is a page-level change,
-   not a component rewrite.
-4. If your project already has Tailwind configured, merge the `theme.extend`
-   block from `tailwind.config.js` into your existing config instead of
-   overwriting it.
-
-## Routes
-
-| Path | Page |
-|---|---|
-| `/` , `/login` | Login (placeholder — replace with existing) |
-| `/dashboard` | Dashboard (video hero, trips, stats, destinations, activity) |
-| `/trips` | My Trips |
-| `/trips/:tripId` | Trip Itinerary (editable view) |
-| `/explore` | Explore Destinations |
-| `/calendar` | Calendar / Timeline / List views |
-| `/share/:tripId` | Public read-only Shared Itinerary |
